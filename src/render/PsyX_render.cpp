@@ -262,6 +262,15 @@ int			g_curVertexBuffer = 0;
 GLuint		g_glBlitFramebuffer;
 GrPBO		g_glFramebufferPBO;
 
+// Full-window copy of the most recently completed Stuntmaster frame. Host
+// presentation can outpace the 60 Hz guest, and the default framebuffer's
+// front buffer is not a reliable copy source on every Windows compositor.
+GLuint		g_glRepeatFramebuffer;
+GLuint		g_glRepeatTexture;
+int			g_glRepeatWidth = 0;
+int			g_glRepeatHeight = 0;
+int			g_glRepeatFrameValid = 0;
+
 GLuint		g_glVRAMFramebuffer;
 
 GLuint		g_glOffscreenFramebuffer;
@@ -413,8 +422,10 @@ void GR_Shutdown()
 	PBO_Destroy(&g_glOffscreenPBO);
 
 	glDeleteFramebuffers(1, &g_glBlitFramebuffer);
+	glDeleteFramebuffers(1, &g_glRepeatFramebuffer);
 	glDeleteFramebuffers(1, &g_glOffscreenFramebuffer);
 	glDeleteFramebuffers(1, &g_glVRAMFramebuffer);
+	glDeleteTextures(1, &g_glRepeatTexture);
 
 	GR_DestroyTexture(g_vramTexturesDouble[0]);
 	GR_DestroyTexture(g_vramTexturesDouble[1]);
@@ -1715,6 +1726,99 @@ void GR_SwapWindow()
 	//glFinish();
 }
 
+void GR_CacheFrameForRepeat()
+{
+#if defined(RENDERER_OGL)
+	if (g_windowWidth <= 0 || g_windowHeight <= 0)
+		return;
+
+	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+
+	if (g_glRepeatTexture == 0)
+		glGenTextures(1, &g_glRepeatTexture);
+	if (g_glRepeatFramebuffer == 0)
+		glGenFramebuffers(1, &g_glRepeatFramebuffer);
+
+	if (g_glRepeatWidth != g_windowWidth ||
+		g_glRepeatHeight != g_windowHeight)
+	{
+		glBindTexture(GL_TEXTURE_2D, g_glRepeatTexture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(
+			GL_TEXTURE_2D, 0, GL_RGBA8,
+			g_windowWidth, g_windowHeight, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRepeatFramebuffer);
+		glFramebufferTexture2D(
+			GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			GL_TEXTURE_2D, g_glRepeatTexture, 0);
+		g_glRepeatWidth = g_windowWidth;
+		g_glRepeatHeight = g_windowHeight;
+		g_glRepeatFrameValid = 0;
+	}
+
+	// Cache the completed back buffer before PsyX swaps it. Unlike GL_FRONT,
+	// this private color attachment has stable ownership and contents.
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glReadBuffer(GL_BACK);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRepeatFramebuffer);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glBlitFramebuffer(
+		0, 0, g_windowWidth, g_windowHeight,
+		0, 0, g_windowWidth, g_windowHeight,
+		GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	g_glRepeatFrameValid = 1;
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glReadBuffer(GL_BACK);
+	glDrawBuffer(GL_BACK);
+	if (scissorEnabled)
+		glEnable(GL_SCISSOR_TEST);
+#endif
+}
+
+void GR_RepeatFrame()
+{
+#if defined(RENDERER_OGL)
+	if (!g_glRepeatFrameValid)
+		return;
+
+	// Never read GL_FRONT here. Its contents can be transient or undefined
+	// under desktop composition; the private attachment gives repeated
+	// presentation stable ownership independent of the window system.
+	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRepeatFramebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glDrawBuffer(GL_BACK);
+	glBlitFramebuffer(
+		0, 0, g_windowWidth, g_windowHeight,
+		0, 0, g_windowWidth, g_windowHeight,
+		GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glReadBuffer(GL_BACK);
+	glDrawBuffer(GL_BACK);
+	if (scissorEnabled)
+		glEnable(GL_SCISSOR_TEST);
+	SDL_GL_SwapWindow(g_window);
+#else
+	// The Stuntmaster Windows target uses desktop OpenGL. Other PsyCross
+	// backends retain their existing swap behavior until they gain an
+	// equivalent explicit front-to-back copy path.
+	GR_SwapWindow();
+#endif
+}
+
 void GR_EnableDepth(int enable)
 {
 	if (g_PreviousDepthMode == enable)
@@ -1832,6 +1936,12 @@ void GR_BindVertexBuffer()
 {
 #if USE_OPENGL
 	glBindVertexArray(g_glVertexArray[g_curVertexBuffer]);
+	// GL_ARRAY_BUFFER is not restored by binding a VAO. Select the buffer
+	// paired with this vertex array before recording attribute pointers and
+	// before GR_UpdateVertexBuffer uploads the new stream. Without this both
+	// VAOs can silently reuse the final buffer bound during initialization,
+	// allowing a later presentation to replace queued vertex data.
+	glBindBuffer(GL_ARRAY_BUFFER, g_glVertexBuffer[g_curVertexBuffer]);
 
 	glEnableVertexAttribArray(a_position);
 	glEnableVertexAttribArray(a_texcoord);

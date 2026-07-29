@@ -823,7 +823,7 @@ char PsyX_BeginScene()
 
 uint PsyX_CalcFPS();
 
-void PsyX_EndScene()
+static void PsyX_EndSceneInternal(int storeFramebuffer)
 {
 	if (!begin_scene_flag)
 		return;
@@ -834,14 +834,25 @@ void PsyX_EndScene()
 #if USE_PGXP
 	PGXP_ClearCache();
 #endif
-
-	GR_EndScene();
 	
-	GR_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
+	GR_EndScene();
+
+	if (storeFramebuffer)
+		GR_StoreFrameBuffer(activeDispEnv.disp.x, activeDispEnv.disp.y, activeDispEnv.disp.w, activeDispEnv.disp.h);
 
 	GR_SwapWindow();
 	
 	SDL_Delay(0);
+}
+
+void PsyX_EndScene()
+{
+	PsyX_EndSceneInternal(1);
+}
+
+void PsyX_EndSceneNoVramStore()
+{
+	PsyX_EndSceneInternal(0);
 }
 
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)

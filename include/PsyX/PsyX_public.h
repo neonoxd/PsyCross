@@ -84,6 +84,8 @@ extern char PsyX_BeginScene(void);
 
 /* Usually called after DrawOTag/DrawOTagEnv */
 extern void PsyX_EndScene(void);
+/* Ends and swaps without feeding the host framebuffer back into PS1 VRAM. */
+extern void PsyX_EndSceneNoVramStore(void);
 
 /* Explicitly updates emulator input loop */
 extern void PsyX_UpdateInput(void);
