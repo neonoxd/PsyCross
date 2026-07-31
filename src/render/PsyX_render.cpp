@@ -1250,6 +1250,11 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 	GLint texLoc = 0;
 	GLint lutLoc = 0;
 	GLint bilinearFilterLoc = 0;
+	// Sampler uniforms are per-program state in GL, so the early-out below
+	// cannot be on the texture alone: a colour-depth change selects a
+	// different program, and that program has never been told which unit
+	// holds the palette. Remember which one was active before the switch.
+	const ShaderID previousShader = g_PreviousShader;
 	switch (texFormat)
 	{
 	case TF_4_BIT:
@@ -1294,7 +1299,11 @@ void GR_SetTexture(TextureID texture, TexFormat texFormat)
 		texture = g_whiteTexture;
 	}
 
-	if (g_lastBoundTexture == texture) {
+	// A new program starts with s_texture and s_lut both defaulted to unit 0,
+	// so a 4- or 8-bit shader entered this way samples its palette out of the
+	// VRAM texture and everything it draws collapses to near-black. Skip the
+	// setup only when neither the texture nor the program has changed.
+	if (g_lastBoundTexture == texture && g_PreviousShader == previousShader) {
 		return;
 	}
 
