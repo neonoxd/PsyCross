@@ -1925,17 +1925,46 @@ void GR_RepeatFrame()
 	if (!g_glRepeatFrameValid)
 		return;
 
-	// Never read GL_FRONT here. Its contents can be transient or undefined
-	// under desktop composition; the private attachment gives repeated
-	// presentation stable ownership independent of the window system.
+	GR_RestoreCachedFrame();
 	GR_PresentRenderTarget(
-		g_glRepeatFramebuffer, g_glRepeatWidth, g_glRepeatHeight);
+		g_glRenderFramebuffer, g_renderWidth, g_renderHeight);
 	SDL_GL_SwapWindow(g_window);
 #else
 	// The Stuntmaster Windows target uses desktop OpenGL. Other PsyCross
 	// backends retain their existing swap behavior until they gain an
 	// equivalent explicit front-to-back copy path.
 	GR_SwapWindow();
+#endif
+}
+
+void GR_RestoreCachedFrame()
+{
+#if defined(RENDERER_OGL)
+	if (!g_glRepeatFrameValid)
+		return;
+
+	// Never read GL_FRONT here. Its contents can be transient or undefined
+	// under desktop composition; the private attachment gives repeated
+	// presentation stable ownership independent of the window system. Restore
+	// it to the internal target so host-owned layers can be recomposited before
+	// the final window blit.
+	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRepeatFramebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRenderFramebuffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glBlitFramebuffer(
+		0, 0, g_glRepeatWidth, g_glRepeatHeight,
+		0, 0, g_renderWidth, g_renderHeight,
+		GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRenderFramebuffer);
+	glReadBuffer(GL_BACK);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glViewport(0, 0, g_renderWidth, g_renderHeight);
+	if (scissorEnabled)
+		glEnable(GL_SCISSOR_TEST);
 #endif
 }
 

@@ -181,6 +181,7 @@ extern void			GR_SwapWindow();
 extern void			GR_SetRenderResolution(int width, int height);
 extern void			GR_BeginRenderTarget();
 extern void			GR_CacheFrameForRepeat();
+extern void			GR_RestoreCachedFrame();
 extern void			GR_RepeatFrame();
 
 // PSX VRAM operations
