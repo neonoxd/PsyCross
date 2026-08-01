@@ -72,6 +72,8 @@ TextureID g_lastBoundTexture = -1;
 
 int g_windowWidth = 0;
 int g_windowHeight = 0;
+int g_renderWidth = 0;
+int g_renderHeight = 0;
 
 int g_dbg_wireframeMode = 0;
 int g_dbg_texturelessMode = 0;
@@ -271,6 +273,14 @@ int			g_glRepeatWidth = 0;
 int			g_glRepeatHeight = 0;
 int			g_glRepeatFrameValid = 0;
 
+// Stuntmaster renders a completed frame at a fixed internal resolution, then
+// scales that immutable image into the independently resizable SDL window.
+GLuint		g_glRenderFramebuffer;
+GLuint		g_glRenderTexture;
+GLuint		g_glRenderDepthStencil;
+int			g_glRenderWidth = 0;
+int			g_glRenderHeight = 0;
+
 GLuint		g_glVRAMFramebuffer;
 
 GLuint		g_glOffscreenFramebuffer;
@@ -383,6 +393,8 @@ int GR_InitialiseRender(char* windowName, int width, int height, int fullscreen)
 {
 	g_windowWidth = width;
 	g_windowHeight = height;
+	g_renderWidth = width;
+	g_renderHeight = height;
 
 	// Due to debugging in fullscreen
 	SDL_SetHint(SDL_HINT_ALLOW_TOPMOST, "0");
@@ -423,9 +435,12 @@ void GR_Shutdown()
 
 	glDeleteFramebuffers(1, &g_glBlitFramebuffer);
 	glDeleteFramebuffers(1, &g_glRepeatFramebuffer);
+	glDeleteFramebuffers(1, &g_glRenderFramebuffer);
 	glDeleteFramebuffers(1, &g_glOffscreenFramebuffer);
 	glDeleteFramebuffers(1, &g_glVRAMFramebuffer);
 	glDeleteTextures(1, &g_glRepeatTexture);
+	glDeleteTextures(1, &g_glRenderTexture);
+	glDeleteRenderbuffers(1, &g_glRenderDepthStencil);
 
 	GR_DestroyTexture(g_vramTexturesDouble[0]);
 	GR_DestroyTexture(g_vramTexturesDouble[1]);
@@ -434,6 +449,66 @@ void GR_Shutdown()
 	GR_DestroyTexture(g_rgLutTexture);
 	GR_DestroyTexture(g_fbTexture);
 	GR_DestroyTexture(g_offscreenRTTexture);
+#endif
+}
+
+void GR_SetRenderResolution(int width, int height)
+{
+	if (width > 0 && height > 0)
+	{
+		g_renderWidth = width;
+		g_renderHeight = height;
+	}
+}
+
+void GR_BeginRenderTarget()
+{
+#if defined(RENDERER_OGL)
+	if (g_renderWidth <= 0 || g_renderHeight <= 0)
+		return;
+
+	if (g_glRenderTexture == 0)
+		glGenTextures(1, &g_glRenderTexture);
+	if (g_glRenderFramebuffer == 0)
+		glGenFramebuffers(1, &g_glRenderFramebuffer);
+	if (g_glRenderDepthStencil == 0)
+		glGenRenderbuffers(1, &g_glRenderDepthStencil);
+
+	if (g_glRenderWidth != g_renderWidth ||
+		g_glRenderHeight != g_renderHeight)
+	{
+		glBindTexture(GL_TEXTURE_2D, g_glRenderTexture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(
+			GL_TEXTURE_2D, 0, GL_RGBA8,
+			g_renderWidth, g_renderHeight, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+		glBindRenderbuffer(GL_RENDERBUFFER, g_glRenderDepthStencil);
+		glRenderbufferStorage(
+			GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+			g_renderWidth, g_renderHeight);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, g_glRenderFramebuffer);
+		glFramebufferTexture2D(
+			GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			GL_TEXTURE_2D, g_glRenderTexture, 0);
+		glFramebufferRenderbuffer(
+			GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+			GL_RENDERBUFFER, g_glRenderDepthStencil);
+		g_glRenderWidth = g_renderWidth;
+		g_glRenderHeight = g_renderHeight;
+		g_glRepeatFrameValid = 0;
+	}
+	else
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, g_glRenderFramebuffer);
+	}
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glViewport(0, 0, g_renderWidth, g_renderHeight);
 #endif
 }
 
@@ -449,6 +524,7 @@ void GR_BeginScene()
 	g_lastBoundTexture = 0;
 
 #if USE_OPENGL
+	GR_BeginRenderTarget();
 #ifdef RENDERER_OGLES
 	//glClearDepthf(1.0f);
 #else
@@ -459,7 +535,7 @@ void GR_BeginScene()
 #endif
 
 	GR_UpdateVRAM();
-	GR_SetViewPort(0, 0, g_windowWidth, g_windowHeight);
+	GR_SetViewPort(0, 0, g_renderWidth, g_renderHeight);
 
 	if (g_dbg_wireframeMode)
 	{
@@ -1166,7 +1242,7 @@ void GR_SetupClipMode(const RECT16* rect, int enable)
 		return;
 
 #if USE_PGXP
-	const float emuScreenAspect = 1.0f / (PSX_SCREEN_ASPECT * (float)g_windowWidth / (float)g_windowHeight);
+	const float emuScreenAspect = 1.0f / (PSX_SCREEN_ASPECT * (float)g_renderWidth / (float)g_renderHeight);
 #else
 	const float emuScreenAspect = 1.0f;
 #endif
@@ -1192,11 +1268,11 @@ void GR_SetupClipMode(const RECT16* rect, int enable)
 
 #if USE_OPENGL
 	// adjust scissor rectangle by the backbuffer size (window dimensions)
-	const float flipOffset = g_windowHeight - clipRectH * (float)g_windowHeight;
-	const float crx = clipRectX * (float)g_windowWidth;
-	const float cry = clipRectY * (float)g_windowHeight;
-	const float crw = clipRectW * (float)g_windowWidth;
-	const float crh = clipRectH * (float)g_windowHeight;
+	const float flipOffset = g_renderHeight - clipRectH * (float)g_renderHeight;
+	const float crx = clipRectX * (float)g_renderWidth;
+	const float cry = clipRectY * (float)g_renderHeight;
+	const float crw = clipRectW * (float)g_renderWidth;
+	const float crh = clipRectH * (float)g_renderHeight;
 
 	glScissor(crx, flipOffset - cry, crw, crh);
 #endif
@@ -1208,7 +1284,7 @@ void PsyX_GetPSXWidescreenMappedViewport(struct _RECT16* rect)
 	float psxScreenW, psxScreenH;
 	float emuScreenAspect;
 
-	emuScreenAspect = (float)(g_windowWidth) / (float)(g_windowHeight);
+	emuScreenAspect = (float)(g_renderWidth) / (float)(g_renderHeight);
 
 	psxScreenW = activeDispEnv.disp.w;
 	psxScreenH = activeDispEnv.disp.h;
@@ -1528,7 +1604,7 @@ void GR_SetOffscreenState(const RECT16* offscreenRect, int enable)
 		const float perspectiveZNear = 0.25f;
 		const float perspectiveZFar = 1000.0f;
 
-		const float emuScreenAspect = (float)(g_windowWidth) / (float)(g_windowHeight);
+		const float emuScreenAspect = (float)(g_renderWidth) / (float)(g_renderHeight);
 
 		GR_Ortho2D(-0.5f * emuScreenAspect * PSX_SCREEN_ASPECT, 0.5f * emuScreenAspect * PSX_SCREEN_ASPECT, 0.5f, -0.5f, -1.0f, 1.0f);
 		GR_Perspective3D(perspectiveFOV, 1.0f, 1.0f / (emuScreenAspect * PSX_SCREEN_ASPECT), perspectiveZNear, perspectiveZFar);
@@ -1565,7 +1641,8 @@ void GR_SetOffscreenState(const RECT16* offscreenRect, int enable)
 	}
 	else
 	{
-		GR_SetViewPort(0, 0, g_windowWidth, g_windowHeight);
+		GR_SetViewPort(0, 0, g_renderWidth, g_renderHeight);
+		glBindFramebuffer(GL_FRAMEBUFFER, g_glRenderFramebuffer);
 
 #if USE_OFFSCREEN_BLIT
 		// before drawing set source and target
@@ -1589,7 +1666,7 @@ void GR_SetOffscreenState(const RECT16* offscreenRect, int enable)
 		}
 #endif
 		
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, g_glRenderFramebuffer);
 		// copy rendering results to VRAM texture
 		{
 			// reat the texture
@@ -1631,10 +1708,10 @@ void GR_StoreFrameBuffer(int x, int y, int w, int h)
 	// before drawing set source and target
 	{
 		// setup draw and read framebuffers
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);					// source is backbuffer
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRenderFramebuffer);	// source is the internal render target
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glBlitFramebuffer);
 
-		glBlitFramebuffer(0, 0, g_windowWidth, g_windowHeight, x, y + h, x + w, y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBlitFramebuffer(0, 0, g_renderWidth, g_renderHeight, x, y + h, x + w, y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 		// Blit framebuffer to VRAM screen area
 
@@ -1654,12 +1731,12 @@ void GR_StoreFrameBuffer(int x, int y, int w, int h)
 
 		
 		// done, unbind
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRenderFramebuffer);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRenderFramebuffer);
 	}
 
 	// after drawing
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, g_glRenderFramebuffer);
 	glFlush();
 #endif
 
@@ -1726,9 +1803,58 @@ void GR_UpdateVRAM()
 #endif
 }
 
+static void GR_PresentRenderTarget(GLuint framebuffer, int width, int height)
+{
+#if defined(RENDERER_OGL)
+	if (framebuffer == 0 || width <= 0 || height <= 0 ||
+		g_windowWidth <= 0 || g_windowHeight <= 0)
+		return;
+
+	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glDrawBuffer(GL_BACK);
+	glViewport(0, 0, g_windowWidth, g_windowHeight);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	int targetWidth = g_windowWidth;
+	int targetHeight = (int)(
+		(uint64_t)g_windowWidth * (uint64_t)height / (uint64_t)width);
+	if (targetHeight > g_windowHeight)
+	{
+		targetHeight = g_windowHeight;
+		targetWidth = (int)(
+			(uint64_t)g_windowHeight * (uint64_t)width /
+			(uint64_t)height);
+	}
+	const GLint x0 = (g_windowWidth - targetWidth) / 2;
+	const GLint y0 = (g_windowHeight - targetHeight) / 2;
+	const GLint x1 = x0 + targetWidth;
+	const GLint y1 = y0 + targetHeight;
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glBlitFramebuffer(
+		0, 0, width, height,
+		x0, y0, x1, y1,
+		GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glReadBuffer(GL_BACK);
+	glDrawBuffer(GL_BACK);
+	if (scissorEnabled)
+		glEnable(GL_SCISSOR_TEST);
+#endif
+}
+
 void GR_SwapWindow()
 {
-#if defined(RENDERER_OGL) || defined(RENDERER_OGLES)
+#if defined(RENDERER_OGL)
+	GR_PresentRenderTarget(
+		g_glRenderFramebuffer, g_renderWidth, g_renderHeight);
+	SDL_GL_SwapWindow(g_window);
+#elif defined(RENDERER_OGLES)
 	SDL_GL_SwapWindow(g_window);
 #endif
 
@@ -1738,7 +1864,7 @@ void GR_SwapWindow()
 void GR_CacheFrameForRepeat()
 {
 #if defined(RENDERER_OGL)
-	if (g_windowWidth <= 0 || g_windowHeight <= 0)
+	if (g_renderWidth <= 0 || g_renderHeight <= 0)
 		return;
 
 	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
@@ -1749,8 +1875,8 @@ void GR_CacheFrameForRepeat()
 	if (g_glRepeatFramebuffer == 0)
 		glGenFramebuffers(1, &g_glRepeatFramebuffer);
 
-	if (g_glRepeatWidth != g_windowWidth ||
-		g_glRepeatHeight != g_windowHeight)
+	if (g_glRepeatWidth != g_renderWidth ||
+		g_glRepeatHeight != g_renderHeight)
 	{
 		glBindTexture(GL_TEXTURE_2D, g_glRepeatTexture);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1759,7 +1885,7 @@ void GR_CacheFrameForRepeat()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glTexImage2D(
 			GL_TEXTURE_2D, 0, GL_RGBA8,
-			g_windowWidth, g_windowHeight, 0,
+			g_renderWidth, g_renderHeight, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 		glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -1767,20 +1893,20 @@ void GR_CacheFrameForRepeat()
 		glFramebufferTexture2D(
 			GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 			GL_TEXTURE_2D, g_glRepeatTexture, 0);
-		g_glRepeatWidth = g_windowWidth;
-		g_glRepeatHeight = g_windowHeight;
+		g_glRepeatWidth = g_renderWidth;
+		g_glRepeatHeight = g_renderHeight;
 		g_glRepeatFrameValid = 0;
 	}
 
 	// Cache the completed back buffer before PsyX swaps it. Unlike GL_FRONT,
 	// this private color attachment has stable ownership and contents.
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-	glReadBuffer(GL_BACK);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRenderFramebuffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_glRepeatFramebuffer);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 	glBlitFramebuffer(
-		0, 0, g_windowWidth, g_windowHeight,
-		0, 0, g_windowWidth, g_windowHeight,
+		0, 0, g_renderWidth, g_renderHeight,
+		0, 0, g_renderWidth, g_renderHeight,
 		GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	g_glRepeatFrameValid = 1;
 
@@ -1802,23 +1928,8 @@ void GR_RepeatFrame()
 	// Never read GL_FRONT here. Its contents can be transient or undefined
 	// under desktop composition; the private attachment gives repeated
 	// presentation stable ownership independent of the window system.
-	const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-	glDisable(GL_SCISSOR_TEST);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, g_glRepeatFramebuffer);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glDrawBuffer(GL_BACK);
-	glBlitFramebuffer(
-		0, 0, g_windowWidth, g_windowHeight,
-		0, 0, g_windowWidth, g_windowHeight,
-		GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-	glReadBuffer(GL_BACK);
-	glDrawBuffer(GL_BACK);
-	if (scissorEnabled)
-		glEnable(GL_SCISSOR_TEST);
+	GR_PresentRenderTarget(
+		g_glRepeatFramebuffer, g_glRepeatWidth, g_glRepeatHeight);
 	SDL_GL_SwapWindow(g_window);
 #else
 	// The Stuntmaster Windows target uses desktop OpenGL. Other PsyCross

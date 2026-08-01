@@ -178,6 +178,8 @@ extern TextureID	g_whiteTexture;
 extern TextureID	g_vramTexture;
 
 extern void			GR_SwapWindow();
+extern void			GR_SetRenderResolution(int width, int height);
+extern void			GR_BeginRenderTarget();
 extern void			GR_CacheFrameForRepeat();
 extern void			GR_RepeatFrame();
 

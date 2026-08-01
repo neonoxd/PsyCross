@@ -14,6 +14,8 @@ extern "C" {
 /* runtime states */
 extern int g_windowWidth;
 extern int g_windowHeight;
+extern int g_renderWidth;
+extern int g_renderHeight;
 extern int g_swapInterval;
 
 /* debug runtime stuff */

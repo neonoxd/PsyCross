@@ -858,15 +858,15 @@ void PsyX_EndSceneNoVramStore()
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 void PsyX_TakeScreenshot()
 {
-	u_char* pixels = (u_char*)malloc(g_windowWidth * g_windowHeight * 4);
+	u_char* pixels = (u_char*)malloc(g_renderWidth * g_renderHeight * 4);
 	
 #if defined(RENDERER_OGL)
-	glReadPixels(0, 0, g_windowWidth, g_windowHeight, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+	glReadPixels(0, 0, g_renderWidth, g_renderHeight, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 #elif defined(RENDERER_OGLES)
-	glReadPixels(0, 0, g_windowWidth, g_windowHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);	// FIXME: is that correct format?
+	glReadPixels(0, 0, g_renderWidth, g_renderHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);	// FIXME: is that correct format?
 #endif
 
-	SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(pixels, g_windowWidth, g_windowHeight, 8 * 4, g_windowWidth * 4, 0, 0, 0, 0);
+	SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(pixels, g_renderWidth, g_renderHeight, 8 * 4, g_renderWidth * 4, 0, 0, 0, 0);
 
 	SDL_SaveBMP(surface, "SCREENSHOT.BMP");
 	SDL_FreeSurface(surface);
