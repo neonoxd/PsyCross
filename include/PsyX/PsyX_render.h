@@ -184,6 +184,14 @@ extern void			GR_CacheFrameForRepeat();
 extern void			GR_RestoreCachedFrame();
 extern void			GR_RepeatFrame();
 
+// One-shot capture of the composed window image (the displayed frame). Call
+// GR_RequestWindowCapture(dst) with a buffer of g_windowWidth*g_windowHeight*4
+// bytes; the next GR_SwapWindow fills it with BGRA8, bottom-up rows, taken
+// before the swap so it is faithful and headless-safe. Query the size with
+// GR_GetWindowCaptureSize. See the definitions.
+extern void			GR_RequestWindowCapture(unsigned char* dst);
+extern void			GR_GetWindowCaptureSize(int* outWidth, int* outHeight);
+
 // PSX VRAM operations
 extern void			GR_SaveVRAM(const char* outputFileName, int x, int y, int width, int height, int bReadFromFrameBuffer);
 extern void			GR_CopyVRAM(unsigned short* src, int x, int y, int w, int h, int dst_x, int dst_y);

@@ -74,6 +74,7 @@ int g_windowWidth = 0;
 int g_windowHeight = 0;
 int g_renderWidth = 0;
 int g_renderHeight = 0;
+int g_psxHiddenWindow = 0;
 
 int g_dbg_wireframeMode = 0;
 int g_dbg_texturelessMode = 0;
@@ -302,6 +303,9 @@ int GR_InitialiseGLContext(char* windowName, int fullscreen)
 
 	if(g_windowWidth <= 0 || g_windowHeight <= 0)
 		windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+
+	if (g_psxHiddenWindow)
+		windowFlags |= SDL_WINDOW_HIDDEN;
 
 	g_window = SDL_CreateWindow(windowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, g_windowWidth, g_windowHeight, windowFlags);
 
@@ -1848,11 +1852,53 @@ static void GR_PresentRenderTarget(GLuint framebuffer, int width, int height)
 #endif
 }
 
+// One-shot window back-buffer capture, serviced inside GR_SwapWindow. PsyCross
+// draws primitives into the VRAM framebuffer; the composed, displayed image only
+// exists in the window back buffer after GR_PresentRenderTarget blits it there,
+// so that -- not the internal render target -- is the faithful capture source.
+// It is grabbed before SDL_GL_SwapWindow so it works with a hidden window.
+static unsigned char* g_grWindowCaptureDst = NULL;
+static int g_grWindowCaptureW = 0;
+static int g_grWindowCaptureH = 0;
+
+void GR_RequestWindowCapture(unsigned char* dst)
+{
+	g_grWindowCaptureDst = dst;
+	g_grWindowCaptureW = 0;
+	g_grWindowCaptureH = 0;
+}
+
+void GR_GetWindowCaptureSize(int* outWidth, int* outHeight)
+{
+	if (outWidth)
+		*outWidth = g_windowWidth;
+	if (outHeight)
+		*outHeight = g_windowHeight;
+}
+
 void GR_SwapWindow()
 {
 #if defined(RENDERER_OGL)
 	GR_PresentRenderTarget(
 		g_glRenderFramebuffer, g_renderWidth, g_renderHeight);
+
+	// Grab the composed window image after the present blit and before the swap
+	// makes the back buffer undefined. Reads BGRA, bottom-up rows (BMP order).
+	if (g_grWindowCaptureDst != NULL && g_windowWidth > 0 && g_windowHeight > 0)
+	{
+		const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+		glDisable(GL_SCISSOR_TEST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		glReadBuffer(GL_BACK);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(0, 0, g_windowWidth, g_windowHeight, GL_BGRA, GL_UNSIGNED_BYTE, g_grWindowCaptureDst);
+		g_grWindowCaptureW = g_windowWidth;
+		g_grWindowCaptureH = g_windowHeight;
+		g_grWindowCaptureDst = NULL;
+		if (scissorEnabled)
+			glEnable(GL_SCISSOR_TEST);
+	}
+
 	SDL_GL_SwapWindow(g_window);
 #elif defined(RENDERER_OGLES)
 	SDL_GL_SwapWindow(g_window);

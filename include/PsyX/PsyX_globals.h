@@ -18,6 +18,11 @@ extern int g_renderWidth;
 extern int g_renderHeight;
 extern int g_swapInterval;
 
+/* When non-zero, the SDL window is created hidden (SDL_WINDOW_HIDDEN). A valid
+   GL context and all offscreen framebuffers are still created, so the enhanced
+   present path runs and can be read back headlessly. Set before PsyX_Initialise. */
+extern int g_psxHiddenWindow;
+
 /* debug runtime stuff */
 extern int g_dbg_emulatorPaused;
 extern int g_dbg_wireframeMode;
