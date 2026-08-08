@@ -721,19 +721,23 @@ void PsyX_Sys_DoPollEvent()
 			{
 				int nKey = event.key.keysym.scancode;
 
-				if (nKey == SDL_SCANCODE_RALT)
+				if (nKey == SDL_SCANCODE_LALT || nKey == SDL_SCANCODE_RALT)
 				{
 					g_altKeyState = (event.type == SDL_KEYDOWN);
 				}
-				else if (nKey == SDL_SCANCODE_RETURN)
+				if (nKey == SDL_SCANCODE_RETURN &&
+					event.type == SDL_KEYDOWN && event.key.repeat == 0 &&
+					(event.key.keysym.mod & KMOD_ALT) != 0)
 				{
-					if (g_altKeyState && event.type == SDL_KEYDOWN)
+					const Uint32 flags = SDL_GetWindowFlags(g_window);
+					const int fullscreen =
+						(flags & SDL_WINDOW_FULLSCREEN) != 0;
+					if (SDL_SetWindowFullscreen(
+							g_window,
+							fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)
 					{
-						int fullscreen = SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN > 0;
-
-						SDL_SetWindowFullscreen(g_window, fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-
-						SDL_GetWindowSize(g_window, &g_windowWidth, &g_windowHeight);
+						SDL_GetWindowSize(
+							g_window, &g_windowWidth, &g_windowHeight);
 						GR_ResetDevice();
 					}
 					break;
