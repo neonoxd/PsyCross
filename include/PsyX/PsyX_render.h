@@ -178,6 +178,11 @@ extern TextureID	g_whiteTexture;
 extern TextureID	g_vramTexture;
 
 extern void			GR_SwapWindow();
+// Split presentation for host-owned window-space layers. The first call
+// aspect-fits the internal target into the backbuffer; callers may then draw
+// directly to framebuffer zero before the second captures and swaps it.
+extern void			GR_PresentRenderTargetToWindow();
+extern void			GR_SwapWindowBuffers();
 extern void			GR_SetRenderResolution(int width, int height);
 extern void			GR_BeginRenderTarget();
 extern void			GR_CacheFrameForRepeat();

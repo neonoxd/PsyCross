@@ -1876,12 +1876,17 @@ void GR_GetWindowCaptureSize(int* outWidth, int* outHeight)
 		*outHeight = g_windowHeight;
 }
 
-void GR_SwapWindow()
+void GR_PresentRenderTargetToWindow()
 {
 #if defined(RENDERER_OGL)
 	GR_PresentRenderTarget(
 		g_glRenderFramebuffer, g_renderWidth, g_renderHeight);
+#endif
+}
 
+void GR_SwapWindowBuffers()
+{
+#if defined(RENDERER_OGL)
 	// Grab the composed window image after the present blit and before the swap
 	// makes the back buffer undefined. Reads BGRA, bottom-up rows (BMP order).
 	if (g_grWindowCaptureDst != NULL && g_windowWidth > 0 && g_windowHeight > 0)
@@ -1905,6 +1910,12 @@ void GR_SwapWindow()
 #endif
 
 	//glFinish();
+}
+
+void GR_SwapWindow()
+{
+	GR_PresentRenderTargetToWindow();
+	GR_SwapWindowBuffers();
 }
 
 void GR_CacheFrameForRepeat()

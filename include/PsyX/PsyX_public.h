@@ -86,6 +86,9 @@ extern char PsyX_BeginScene(void);
 extern void PsyX_EndScene(void);
 /* Ends and swaps without feeding the host framebuffer back into PS1 VRAM. */
 extern void PsyX_EndSceneNoVramStore(void);
+// Finish drawing into the internal target without presenting it. A host
+// presentation adapter can add window-space layers before swapping.
+extern void PsyX_EndSceneNoVramStoreNoSwap(void);
 
 /* Explicitly updates emulator input loop */
 extern void PsyX_UpdateInput(void);
