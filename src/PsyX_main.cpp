@@ -725,21 +725,14 @@ void PsyX_Sys_DoPollEvent()
 				{
 					g_altKeyState = (event.type == SDL_KEYDOWN);
 				}
+				// Alt+Enter fullscreen is owned by the host application, which
+				// uses app-managed Win32 borderless (SDL's fullscreen modes are
+				// unreliable on Windows and fight the toggle). The Alt key-state
+				// tracking above is kept so held-Alt still suppresses pad input.
 				if (nKey == SDL_SCANCODE_RETURN &&
 					event.type == SDL_KEYDOWN && event.key.repeat == 0 &&
 					(event.key.keysym.mod & KMOD_ALT) != 0)
 				{
-					const Uint32 flags = SDL_GetWindowFlags(g_window);
-					const int fullscreen =
-						(flags & SDL_WINDOW_FULLSCREEN) != 0;
-					if (SDL_SetWindowFullscreen(
-							g_window,
-							fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)
-					{
-						SDL_GetWindowSize(
-							g_window, &g_windowWidth, &g_windowHeight);
-						GR_ResetDevice();
-					}
 					break;
 				}
 
